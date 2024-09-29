@@ -1,76 +1,134 @@
 import discord
 from discord.ext import commands
-from discord import ui
 
-# Kanal-IDs definieren
-TEXT_CHANNEL_ID = 1286057563699282111  # Kanal-ID, in dem die Nachrichten gelöscht werden sollen
-FORUM_CHANNEL_ID = 1286062719824560190  # Forum-Kanal-ID, in dem die Beiträge erstellt werden sollen
+def load_config():
+    config = {}
+    with open('infos.txt', 'r') as file:
+        for line in file:
+            if '=' in line:
+                key, value = line.strip().split('=')
+                config[key] = value
+    return config
 
-# Intents initialisieren
+# Lade die Konfiguration
+config = load_config()
+
 intents = discord.Intents.default()
-intents.message_content = True
 intents.guilds = True
+intents.messages = True
+intents.message_content = True
 
-# Bot erstellen
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix='!', intents=intents)
 
-# Globaler Zähler für die Beitragsnummer
-post_counter = 1
+CATEGORY_ID = int(config['CATEGORY_ID'])  # Kategorie-ID
+CHANNEL_ID_CREATE_WORKS = int(config['CHANNEL_ID_CREATE_WORKS'])  # ID für den Create Works Channel
+CHANNEL_ID_AUFGABEN = int(config['CHANNEL_ID_AUFGABEN'])  # ID für den Aufgaben Channel
+ADMIN_ROLE_ID = int(config['ADMIN_ROLE_ID'])  # Rolle-ID für die Admin-Rolle
+LOG_CHANNEL_ID = int(config['LOG_CHANNEL_ID'])  # ID für den Log-Channel
 
-# Button zum Formular
-class FormButton(ui.View):
-    @ui.button(label="Formular ausfüllen", style=discord.ButtonStyle.primary)
-    async def button_callback(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_modal(FormModal())
+active_tasks = set()  # Set zur Verfolgung aktiver Aufgaben
 
-# Modal für das Formular
-class FormModal(ui.Modal, title="Formular ausfüllen"):
-    post_title = ui.TextInput(label="Titel des Beitrags", placeholder="Gib den Titel des Beitrags ein", required=True)
-    post_description = ui.TextInput(label="Beschreibung", placeholder="Gib die Beschreibung des Beitrags ein", style=discord.TextStyle.long, required=True)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        global post_counter  # Zugriff auf den globalen Zähler
-
-        # Generiere den vollständigen Titel mit der fortlaufenden Nummer
-        formatted_title = f"{self.post_title.value} / # {post_counter}"
-
-        # Erstelle den Beitrag im Forum mit den übermittelten Daten
-        channel = bot.get_channel(FORUM_CHANNEL_ID)
-        if isinstance(channel, discord.ForumChannel):  # Stelle sicher, dass der Kanal vom Typ ForumChannel ist
-            # Erstelle einen Beitrag mit den übermittelten Daten
-            thread = await channel.create_thread(
-                name=formatted_title,  # Verwende den vollständigen Titel mit der Nummer
-                content=self.post_description.value,  # Verwende den Wert des Beschreibung-Feldes
-                reason="Neues Thema erstellt durch das Formular"
-            )
-
-            await interaction.response.send_message(
-                f'Danke, dein Beitrag wurde erstellt:\n**Titel:** {formatted_title}\n**Beschreibung:** {self.post_description.value}',
-                ephemeral=True
-            )
-
-            # Zähler erhöhen
-            post_counter += 1
-        else:
-            await interaction.response.send_message("Der Kanal ist nicht vom Typ `ForumChannel`.", ephemeral=True)
-
-# Event: Bot ist bereit
 @bot.event
 async def on_ready():
-    print(f'Bot ist eingeloggt als {bot.user}')
+    print(f'Bot ist bereit. Eingeloggt als {bot.user}')
+    await delete_old_channel_and_send_button()
 
-    # Kanal definieren, in dem die Nachrichten gelöscht werden sollen
-    text_channel = bot.get_channel(TEXT_CHANNEL_ID)
+async def delete_old_channel_and_send_button():
+    channel = bot.get_channel(CHANNEL_ID_CREATE_WORKS)
+    if channel:
+        await channel.purge(limit=100)
 
-    # Alle Nachrichten in dem Kanal löschen, wenn es ein TextChannel ist
-    if isinstance(text_channel, discord.TextChannel):  # Stelle sicher, dass der Kanal vom Typ TextChannel ist
-        await text_channel.purge(limit=None)
-        print(f'Alle Nachrichten im Channel {text_channel.name} wurden gelöscht.')
+        button = discord.ui.Button(label="Aufgabe erstellen", style=discord.ButtonStyle.primary)
+        button.callback = create_task_form
+        view = discord.ui.View()
+        view.add_item(button)
 
-    # Button zum Formular senden
-    forum_channel = bot.get_channel(TEXT_CHANNEL_ID)  # Verwende hier den TextChannel zum Senden des Buttons
-    if isinstance(forum_channel, discord.TextChannel):  # Stelle sicher, dass der Kanal vom Typ TextChannel ist
-        await forum_channel.send("Klicke auf den Button, um das Formular auszufüllen:", view=FormButton())
+        await channel.send("Klicke den Button, um eine Aufgabe zu erstellen:", view=view)
 
-# Starte den Bot (ersetze DEIN_BOT_TOKEN durch deinen echten Bot-Token)
-bot.run('DEIN_BOT_TOKEN')
+async def create_task_form(interaction: discord.Interaction):
+    # Überprüfe, ob bereits eine aktive Aufgabe existiert
+    if active_tasks:
+        await interaction.response.send_message("Es gibt bereits eine aktive Aufgabe. Bitte schließe diese zuerst.", ephemeral=True)
+        return
+
+    modal = discord.ui.Modal(title="Aufgabe erstellen")
+    title_input = discord.ui.TextInput(label="Titel des Channels", required=True)
+    message_input = discord.ui.TextInput(label="Erste Nachricht", required=True)
+
+    modal.add_item(title_input)
+    modal.add_item(message_input)
+
+    await interaction.response.send_modal(modal)
+
+    await modal.wait()
+    channel_title = title_input.value
+    first_message = message_input.value
+
+    if not channel_title or not first_message:
+        await interaction.followup.send("Bitte stelle sicher, dass beide Felder ausgefüllt sind.", ephemeral=True)
+        return
+
+    active_tasks.add(interaction.user.id)  # Füge die Benutzer-ID zu den aktiven Aufgaben hinzu
+
+    category = bot.get_channel(CATEGORY_ID)
+    admin_role = interaction.guild.get_role(ADMIN_ROLE_ID)
+
+    if not admin_role:
+        await interaction.followup.send("Keine Admin-Rolle mit der angegebenen ID gefunden.", ephemeral=True)
+        return
+
+    overwrites = {
+        interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        interaction.guild.me: discord.PermissionOverwrite(read_messages=True),
+        admin_role: discord.PermissionOverwrite(read_messages=True)
+    }
+
+    new_channel = await category.create_text_channel(channel_title, overwrites=overwrites)
+
+    # Sende die Embed-Nachricht mit einem Zuweisen- und einem Erledigt-Button in den neuen Channel
+    embed = discord.Embed(title=channel_title, description=first_message, color=discord.Color.blue())
+
+    assign_button = discord.ui.Button(label="Zuweisen", style=discord.ButtonStyle.success)
+    assign_button.callback = lambda inter: assign_task(inter, new_channel, embed)
+
+    done_button = discord.ui.Button(label="Erledigt", style=discord.ButtonStyle.danger)
+    done_button.callback = lambda inter: complete_task(inter, new_channel, embed)
+
+    view = discord.ui.View()
+    view.add_item(assign_button)
+    view.add_item(done_button)
+
+    await new_channel.send(embed=embed, view=view)  # Sende die Embed-Nachricht mit Buttons in den neuen Channel
+
+    await interaction.followup.send(f"Channel **{channel_title}** wurde erstellt!", ephemeral=True)
+
+async def assign_task(interaction: discord.Interaction, channel: discord.TextChannel, embed: discord.Embed):
+    # Überprüfe, ob die Zuweisung im Aufgaben-Channel erfolgt
+    if interaction.channel.id != CHANNEL_ID_AUFGABEN:
+        await interaction.response.send_message("Du kannst Aufgaben nur im Aufgaben-Channel zuweisen.", ephemeral=True)
+        return
+
+    # Gewähre dem Benutzer Zugriff auf den Channel
+    await channel.set_permissions(interaction.user, read_messages=True)
+
+    # Lösche die Embed-Nachricht aus dem Aufgaben-Channel
+    await interaction.message.delete()
+
+    await interaction.response.send_message(f"Du hast Zugriff auf den Channel **{channel.name}** erhalten.", ephemeral=True)
+
+async def complete_task(interaction: discord.Interaction, channel: discord.TextChannel, embed: discord.Embed):
+    # Protokolliere die Erledigung in einem Log-Channel
+    log_channel = bot.get_channel(LOG_CHANNEL_ID)
+    if log_channel:
+        await log_channel.send(f"Aufgabe **{embed.title}** wurde als erledigt markiert von {interaction.user.mention}.")
+
+    # Entferne die Benutzer-ID aus den aktiven Aufgaben
+    active_tasks.discard(interaction.user.id)
+
+    # Lösche die Embed-Nachricht aus dem Aufgaben-Channel
+    await interaction.message.delete()
+
+    await interaction.response.send_message(f"Die Aufgabe **{channel.name}** wurde als erledigt markiert.", ephemeral=True)
+
+bot.run(config['BOT_TOKEN'])
+
