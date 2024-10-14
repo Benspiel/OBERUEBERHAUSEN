@@ -19,7 +19,7 @@ TOKEN, CHANNEL_ID, CATEGORY_ID, TARGET_CHANNEL_ID, LOG_CHANNEL_ID, ROLE_ID = rea
 # Erstelle den Bot mit Command-Intents und App Command Tree
 intents = discord.Intents.default()
 intents.messages = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="/", intents=intents)
 
 # Speichere aktive Claims pro Aufgabe
 active_claims = {}
@@ -29,7 +29,7 @@ class FormModal(Modal):
         super().__init__(title="Formular")
 
         # Füge Eingabefelder hinzu
-        self.title_input = TextInput(label="Titel", placeholder="Gib den Titel ein...")
+        self.title_input = TextInput(label="Aufgabe", placeholder="INFOS")
         self.description_input = TextInput(label="Beschreibung", style=discord.TextStyle.paragraph, placeholder="Gib die Beschreibung ein...")
         self.max_claims_input = TextInput(label="Maximale Anzahl an Claimer", placeholder="Gib die maximale Anzahl ein...", style=discord.TextStyle.short)
 
@@ -169,11 +169,11 @@ class FormModal(Modal):
 @bot.event
 async def on_ready():
     try:
-        print(f"Bot {bot.user} ist eingeloggt und bereit.")
+        print(f"OBERÜBERHAUSEN ist eingeloggt und bereit.")
         channel = bot.get_channel(CHANNEL_ID)
-        await channel.purge(limit=100)  # Löscht die Nachrichten im Kanal bei jedem Start
+        await channel.purge(limit=100)  
 
-        # Button, um das Formular zu öffnen
+        
         button = Button(label="Aufgabe erstellen", style=discord.ButtonStyle.primary)
 
         async def button_callback(interaction: discord.Interaction):
